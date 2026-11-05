@@ -15,6 +15,30 @@
 
 ----
 
+####################################
+Changes in This Fork (vs. 1.4.3)
+####################################
+
+*2026-11 · 基于上游 genicam/harvesters 1.4.3。配套 GUI 见 harvesters_gui fork。*
+
+新增功能
+========
+
+- **GenDC 载荷支持**（\ ``_private/core/gendc.py``）：按 EMVA GenDC v1.2 标准头文件与参考解析器（GenDCParser.cpp）1:1 移植的容器解析器，含完整的描述符与数据范围校验；仅校验主版本号，兼容 v1.0/1.1/1.2 容器。
+- **PayloadGenDC**（\ ``core.py``）：当缓冲 payload type 为 ``PAYLOAD_TYPE_GENDC (11)``，或为未识别类型且数据以 ``GNDC`` 签名开头时自动解析容器，将每个未压缩 2D Array Part（已知 PFNC 格式）转换为 ``Component2DImage``；自动剥离行/列填充（PaddingX/PaddingY，返回紧凑数据）；压缩格式（JPEG 等）、自定义与未知格式跳过并记录日志。
+- **有效类型上报**：``Buffer.payload_type`` 对 GenDC 缓冲返回 11（原始值仍可经 ``buffer.module.payload_type`` 读取）；容器解析失败时降级为 ``PayloadUnknown``（空组件），绝不向采集线程抛出异常。
+- **Bayer 工具**（\ ``util/bayer.py``）：双线性去马赛克 ``demosaic()``（RGGB/GRBG/GBRG/BGGR，边缘复制）与 ``cfa_positions()``（CFA tile 位置查询；GUI 的 GPU 着色器与 CPU 实现共用同一 tile 语义）。
+- **单元测试**：``test/test_gendc.py``（25 例）+ ``test/test_bayer.py``（8 例），全部基于合成 GenDC 容器，无需相机：``python -m unittest harvesters.test.test_gendc harvesters.test.test_bayer``。
+
+兼容性
+======
+
+- 已在 Python 3.14 + genicam 1.6.0 + numpy 2.5 环境验证（RDMA 相机、BayerRG8 5320×4600、60 fps 场景）。
+- genicam < 1.5（无 ``PAYLOAD_TYPE_GENDC`` 常量）时自动回退到内置常量 11。
+- payload type 0-8、10 的既有分支零改动（含回归测试）。
+
+----
+
 .. contents:: Table of Contents
     :depth: 1
 

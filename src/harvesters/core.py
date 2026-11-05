@@ -75,6 +75,7 @@ from genicam.gentl import Buffer as _Buffer, Device as _Device, \
 from harvesters._private.core.port import ConcretePort
 from harvesters._private.core.statistics import Statistics
 from harvesters._private.core.helper.system import is_running_on_windows
+from harvesters._private.core import gendc as _gendc
 from harvesters.util.logging import get_logger
 from harvesters.util.pfnc import dict_by_names, dict_by_ints
 from harvesters.util.pfnc import Dictionary, _PixelFormat
@@ -89,6 +90,29 @@ _sleep_default = 0.000001  # s
 
 
 _logger = get_logger(name=__name__)
+
+
+# The GenDC payload type; genicam < 1.6 does not define it:
+_PAYLOAD_TYPE_GENDC = int(
+    getattr(PAYLOADTYPE_INFO_IDS, 'PAYLOAD_TYPE_GENDC', 11))
+
+# The payload types that Buffer._build_payload explicitly dispatches on;
+# a buffer with any other payload type is a GenDC candidate as long as it
+# starts with the GenDC signature:
+_HANDLED_PAYLOAD_TYPES = frozenset(
+    int(t) for t in (
+        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_UNKNOWN,
+        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_IMAGE,
+        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_RAW_DATA,
+        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_FILE,
+        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_JPEG,
+        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_JPEG2000,
+        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_H264,
+        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_CHUNK_DATA,
+        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_CHUNK_ONLY,
+        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_MULTI_PART,
+    )
+)
 
 
 class ParameterKey(IntEnum):
@@ -1153,6 +1177,27 @@ class Component2DImage(Component):
             return 0
 
 
+def _may_be_gendc(*, p_type, buffer: _Buffer) -> bool:
+    """
+    Returns True if the buffer reports a payload type that
+    :meth:`Buffer._build_payload` does not dispatch on while its content
+    starts with the GenDC signature; such a buffer is treated as a GenDC
+    container candidate.
+
+    :param p_type:
+    :param buffer:
+    """
+    if p_type in _HANDLED_PAYLOAD_TYPES or p_type == _PAYLOAD_TYPE_GENDC:
+        return False
+    try:
+        # The GenDC signature is b'GNDC' at the container start:
+        head = bytes(buffer.raw_buffer[:4])
+    except Exception as error:  # Producers may refuse the raw access.
+        _logger.debug('cannot sniff the payload: {}'.format(error))
+        return False
+    return head == b'GNDC'
+
+
 class Buffer(Module):
     """
     Is provided by an :class:`ImageAcquire` object when you call its
@@ -1237,8 +1282,15 @@ class Buffer(Module):
     def payload_type(self):
         """
         PAYLOADTYPE_INFO_IDS: The payload type that the :class:`Buffer`
-        object contains.
+        object contains. If the payload has been identified as a GenDC
+        container, the effective type
+        :const:`PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC` is reported
+        even when the GenTL producer announced the buffer with a
+        different payload type value; the raw producer value remains
+        available through ``self.module.payload_type``.
         """
+        if isinstance(self._payload, PayloadGenDC):
+            return _PAYLOAD_TYPE_GENDC
         return self.module.payload_type
 
     @property
@@ -1310,6 +1362,25 @@ class Buffer(Module):
 
         elif p_type == PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_MULTI_PART:
             payload = PayloadMultiPart(buffer=buffer, node_map=node_map)
+
+        elif p_type == _PAYLOAD_TYPE_GENDC or \
+                _may_be_gendc(p_type=p_type, buffer=buffer):
+            try:
+                payload = PayloadGenDC(buffer=buffer, node_map=node_map)
+            except _gendc.GenDCParseError as error:
+                # Do not raise into the acquisition loop. The buffer has
+                # been identified as a GenDC candidate but its container
+                # is malformed; expose it as an unknown payload with no
+                # components rather than handing out its raw bytes as an
+                # image, which would either display the container header
+                # as pixels or yield a None component:
+                info = json.dumps(
+                    {"payload type": "{}".format(p_type),
+                     "error": "{}".format(error)})
+                _logger.warning(
+                    "invalid GenDC container; discarding its "
+                    "components: {}".format(info))
+                payload = PayloadUnknown(buffer=buffer)
 
         else:
             info = json.dumps({"payload type": "{}".format(p_type)})
@@ -1536,6 +1607,136 @@ class PayloadMultiPart(Payload):
             self._components.append(
                 self._build_component(
                     buffer=buffer, part=part, node_map=node_map))
+
+    def __repr__(self):
+        ret = ''
+        for i, c in enumerate(self.components):
+            ret += 'Component {}: {}\n'.format(i, c.__repr__())
+        ret = ret[:-1]
+        return ret
+
+
+class _GenDCPart:
+    """
+    Bridges a parsed GenDC part, which has been extracted from a GenDC
+    container, to the duck-typed part interface that
+    :class:`Component2DImage` expects; see the ``part`` argument of its
+    constructor.
+    """
+    def __init__(self, part: '_gendc.Part'):
+        """
+        :param part:
+        """
+        super().__init__()
+
+        self.width = part.width
+        self.height = part.height
+        self.data_format = part.format
+        self.data_offset = part.data_offset
+        self.data_size = part.data_size
+        self.x_offset = 0
+        self.y_offset = 0
+        self.x_padding = part.padding_x
+        self.y_padding = part.padding_y
+        self.delivered_image_height = part.height
+
+
+class _GenDCComponent2DImage(Component2DImage):
+    """
+    Is a :class:`Component2DImage` whose source part may carry per-line
+    padding. GenDC pads every line of a 2D part to ``PaddingX`` bytes
+    while the clients, including the GUI, assume packed rows; this class
+    strips the padding and returns a packed, contiguous NumPy array. A
+    part without padding behaves exactly like a conventional image
+    payload, returning a plain read-only view on the buffer.
+    """
+    def _to_np_array(self, pf_proxy):
+        padding_x = self._part.x_padding
+        padding_y = self._part.y_padding
+        if padding_x <= 0 and padding_y <= 0:
+            return super()._to_np_array(pf_proxy)
+
+        width = self._part.width
+        height = self._part.height
+        nr_bytes_per_line = self._get_nr_bytes(
+            pf_proxy=pf_proxy, width=width, height=1)
+        stride = nr_bytes_per_line + padding_x
+        nr_bytes = stride * height
+        if nr_bytes > self._part.data_size:
+            raise ValueError(
+                'GenDC part data size {} cannot hold the padded image '
+                'of {} bytes'.format(self._part.data_size, nr_bytes))
+
+        array = numpy.frombuffer(
+            self._buffer.raw_buffer, count=int(nr_bytes),
+            dtype='uint8', offset=self._part.data_offset)
+        array = numpy.reshape(array, (height, stride))
+        # Strip the per-line padding and drop the trailing PaddingY bytes;
+        # the clients need packed rows:
+        array = numpy.ascontiguousarray(array[:, :nr_bytes_per_line])
+        return pf_proxy.expand(numpy.ravel(array))
+
+    def represent_pixel_location(self):
+        #
+        # The padding has already been stripped by _to_np_array, so the
+        # data is packed; the base class implementation must not add the
+        # padding back when it calculates the shape:
+        if self._part.x_padding > 0 or self._part.y_padding > 0:
+            if self.data is None or self.data.size == 0:
+                return None
+            return self._data.reshape(
+                self.height, int(self.width * self._nr_components))
+        return super().represent_pixel_location()
+
+
+class PayloadGenDC(Payload):
+    """
+    Represents a payload that is classified as
+    :const:`genicam.gentl.PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC` by
+    the GenTL Standard. Turning the payload into its components parses
+    the GenDC container in the buffer and turns every uncompressed 2D
+    array part that uses a known PFNC pixel format into a
+    :class:`Component2DImage`; the other parts, such as GenICam chunk
+    parts, are not exposed as image components.
+    """
+    def __init__(self, *, buffer: _Buffer,
+                 node_map: Optional[NodeMap] = None):
+        """
+        :param buffer:
+        :param node_map:
+        :raises harvesters._private.core.gendc.GenDCParseError
+            If the buffer does not hold a valid GenDC container.
+        """
+        super().__init__(buffer=buffer)
+
+        container = _gendc.parse(buffer.raw_buffer)
+        for component in container.components:
+            for part in component.parts:
+                if not part.is_array2d():
+                    continue
+                symbolic = dict_by_ints.get(part.format)
+                if symbolic is None or symbolic not in component_2d_formats:
+                    _logger.debug(
+                        'skipping GenDC part: unsupported pixel format '
+                        '{:#010x}'.format(part.format))
+                    continue
+                try:
+                    self._components.append(
+                        _GenDCComponent2DImage(
+                            buffer=buffer, part=_GenDCPart(part),
+                            node_map=node_map))
+                except (GenTL_GenericException, GenApi_GenericException,
+                        ValueError) as error:
+                    _logger.warning(
+                        'skipping GenDC part: {}'.format(error))
+
+    @property
+    def payload_type(self) -> int:
+        """
+        int: The type of the payload, which is
+        :const:`_PAYLOAD_TYPE_GENDC`.
+        """
+        return _PAYLOAD_TYPE_GENDC
 
     def __repr__(self):
         ret = ''
