@@ -19,7 +19,6 @@
 
 # Standard library imports
 import unittest
-from types import SimpleNamespace
 
 # Related third party imports
 from unittest.mock import MagicMock
@@ -28,9 +27,6 @@ from genicam.gentl import NotAvailableException
 
 # Local application/library specific imports
 from harvesters.core import ImageAcquirer
-
-
-_MONO8 = 0x01080001
 
 
 def _make_acquirer(node_map):
