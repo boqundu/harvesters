@@ -554,21 +554,24 @@ class TestPayloadDispatch(unittest.TestCase):
             numpy.array_equal(numpy.frombuffer(pixels, dtype=numpy.uint8),
                               component.data))
 
-    def test_dispatch_by_signature_sniffing(self):
-        # A producer that reports an unhandled payload type but delivers
-        # GenDC containers:
+    def test_non_gendc_type_never_dispatches_as_gendc(self):
+        # Dispatch is by the announced payload type only; a producer
+        # that reports an unhandled payload type takes the legacy
+        # "assume image" remedy even if the data happens to hold a
+        # GenDC container:
         pixels = bytes(range(12))
         raw = build_container(
             [{'parts': [{'kind': '2d', 'fmt': MONO8, 'size_x': 4,
                          'size_y': 3, 'data': pixels}]}])
-        module = _FakeBufferModule(raw, payload_type=9)
+        module = _FakeBufferModule(
+            raw, payload_type=9, pixel_format=MONO8, width=4, height=3)
         payload = Buffer._build_payload(buffer=module,
                                         node_map=self._node_map())
-        self.assertIsInstance(payload, PayloadGenDC)
+        self.assertIsInstance(payload, PayloadImage)
 
     def test_unknown_type_without_signature_takes_remedy(self):
-        # payload type 9 without the GNDC magic must take the legacy
-        # "assume image" remedy exactly as before:
+        # An unhandled payload type takes the legacy "assume image"
+        # remedy exactly as before, regardless of the data content:
         pixels = bytes(range(12))
         module = _FakeBufferModule(
             pixels, payload_type=9, pixel_format=MONO8, width=4, height=3)
@@ -592,20 +595,23 @@ class TestPayloadDispatch(unittest.TestCase):
         self.assertIsInstance(payload, PayloadUnknown)
         self.assertEqual([], payload.components)
 
-    def test_payload_type_reports_effective_gendc(self):
-        # A producer that announces a non-GENDC payload type while
-        # delivering GenDC containers: the wrapper Buffer must report
-        # the effective type so that clients gate on what the payload
-        # actually is:
+    def test_payload_type_matches_announced_gendc(self):
+        # A GenDC-typed buffer reports the announced type both through
+        # the wrapper Buffer and through the payload:
         pixels = bytes(range(12))
         raw = build_container(
             [{'parts': [{'kind': '2d', 'fmt': MONO8, 'size_x': 4,
                          'size_y': 3, 'data': pixels}]}])
-        module = _FakeBufferModule(raw, payload_type=9)
+        module = _FakeBufferModule(
+            raw, payload_type=PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC)
         buffer = Buffer(module=module, node_map=self._node_map())
         self.assertIsInstance(buffer.payload, PayloadGenDC)
-        self.assertEqual(PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC, buffer.payload_type)
-        self.assertEqual(9, module.payload_type)
+        self.assertEqual(
+            int(PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC),
+            int(buffer.payload_type))
+        self.assertEqual(
+            int(PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC),
+            int(buffer.payload.payload_type))
 
     def test_represent_pixel_location_with_padding(self):
         # The padding is stripped from the data, so the pixel location

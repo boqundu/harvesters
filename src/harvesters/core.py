@@ -92,25 +92,6 @@ _sleep_default = 0.000001  # s
 _logger = get_logger(name=__name__)
 
 
-# The payload types that Buffer._build_payload explicitly dispatches on;
-# a buffer with any other payload type is a GenDC candidate as long as it
-# starts with the GenDC signature:
-_HANDLED_PAYLOAD_TYPES = frozenset(
-    int(t) for t in (
-        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_UNKNOWN,
-        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_IMAGE,
-        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_RAW_DATA,
-        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_FILE,
-        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_JPEG,
-        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_JPEG2000,
-        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_H264,
-        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_CHUNK_DATA,
-        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_CHUNK_ONLY,
-        PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_MULTI_PART,
-    )
-)
-
-
 class ParameterKey(IntEnum):
     __doc__ = "A list of variable/defined parameters."
     _ENABLE_PROFILE = -1
@@ -1173,27 +1154,6 @@ class Component2DImage(Component):
             return 0
 
 
-def _may_be_gendc(*, p_type, buffer: _Buffer) -> bool:
-    """
-    Returns True if the buffer reports a payload type that
-    :meth:`Buffer._build_payload` does not dispatch on while its content
-    starts with the GenDC signature; such a buffer is treated as a GenDC
-    container candidate.
-
-    :param p_type:
-    :param buffer:
-    """
-    if p_type in _HANDLED_PAYLOAD_TYPES or p_type == PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC:
-        return False
-    try:
-        # The GenDC signature is b'GNDC' at the container start:
-        head = bytes(buffer.raw_buffer[:4])
-    except Exception as error:  # Producers may refuse the raw access.
-        _logger.debug('cannot sniff the payload: {}'.format(error))
-        return False
-    return head == b'GNDC'
-
-
 class Buffer(Module):
     """
     Is provided by an :class:`ImageAcquire` object when you call its
@@ -1278,15 +1238,8 @@ class Buffer(Module):
     def payload_type(self):
         """
         PAYLOADTYPE_INFO_IDS: The payload type that the :class:`Buffer`
-        object contains. If the payload has been identified as a GenDC
-        container, the effective type
-        :const:`PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC` is reported
-        even when the GenTL producer announced the buffer with a
-        different payload type value; the raw producer value remains
-        available through ``self.module.payload_type``.
+        object contains.
         """
-        if isinstance(self._payload, PayloadGenDC):
-            return PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC
         return self.module.payload_type
 
     @property
@@ -1359,8 +1312,7 @@ class Buffer(Module):
         elif p_type == PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_MULTI_PART:
             payload = PayloadMultiPart(buffer=buffer, node_map=node_map)
 
-        elif p_type == PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC or \
-                _may_be_gendc(p_type=p_type, buffer=buffer):
+        elif p_type == PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC:
             try:
                 payload = PayloadGenDC(buffer=buffer, node_map=node_map)
             except _gendc.GenDCParseError as error:
@@ -1725,14 +1677,6 @@ class PayloadGenDC(Payload):
                         ValueError) as error:
                     _logger.warning(
                         'skipping GenDC part: {}'.format(error))
-
-    @property
-    def payload_type(self) -> int:
-        """
-        int: The type of the payload, which is
-        :const:`PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC`.
-        """
-        return PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC
 
     def __repr__(self):
         ret = ''
