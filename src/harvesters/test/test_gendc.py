@@ -31,12 +31,12 @@ from harvesters._private.core.gendc import (
     GenDCParseError,
     parse,
 )
+from genicam.gentl import PAYLOADTYPE_INFO_IDS
 from harvesters.core import (
     Buffer,
     PayloadGenDC,
     PayloadImage,
     PayloadUnknown,
-    _PAYLOAD_TYPE_GENDC,
 )
 
 
@@ -221,7 +221,7 @@ class _FakeBufferModule:
     Mimics the attributes of a GenTL Buffer module that the payload
     building code touches.
     """
-    def __init__(self, raw_buffer, *, payload_type=_PAYLOAD_TYPE_GENDC,
+    def __init__(self, raw_buffer, *, payload_type=PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC,
                  pixel_format=MONO8, width=4, height=3):
         self.parent = None
         self._raw_buffer = raw_buffer
@@ -541,7 +541,7 @@ class TestPayloadDispatch(unittest.TestCase):
         raw = build_container(
             [{'parts': [{'kind': '2d', 'fmt': MONO8, 'size_x': 4,
                          'size_y': 3, 'data': pixels}]}])
-        module = _FakeBufferModule(raw, payload_type=_PAYLOAD_TYPE_GENDC)
+        module = _FakeBufferModule(raw, payload_type=PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC)
         payload = Buffer._build_payload(buffer=module,
                                         node_map=self._node_map())
         self.assertIsInstance(payload, PayloadGenDC)
@@ -585,7 +585,7 @@ class TestPayloadDispatch(unittest.TestCase):
         # no components so that no client can mistake the container
         # bytes for an image:
         module = _FakeBufferModule(
-            b'XXXX' + bytes(48), payload_type=_PAYLOAD_TYPE_GENDC,
+            b'XXXX' + bytes(48), payload_type=PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC,
             pixel_format=MONO8, width=4, height=3)
         payload = Buffer._build_payload(buffer=module,
                                         node_map=self._node_map())
@@ -604,7 +604,7 @@ class TestPayloadDispatch(unittest.TestCase):
         module = _FakeBufferModule(raw, payload_type=9)
         buffer = Buffer(module=module, node_map=self._node_map())
         self.assertIsInstance(buffer.payload, PayloadGenDC)
-        self.assertEqual(_PAYLOAD_TYPE_GENDC, buffer.payload_type)
+        self.assertEqual(PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC, buffer.payload_type)
         self.assertEqual(9, module.payload_type)
 
     def test_represent_pixel_location_with_padding(self):

@@ -92,10 +92,6 @@ _sleep_default = 0.000001  # s
 _logger = get_logger(name=__name__)
 
 
-# The GenDC payload type; genicam < 1.6 does not define it:
-_PAYLOAD_TYPE_GENDC = int(
-    getattr(PAYLOADTYPE_INFO_IDS, 'PAYLOAD_TYPE_GENDC', 11))
-
 # The payload types that Buffer._build_payload explicitly dispatches on;
 # a buffer with any other payload type is a GenDC candidate as long as it
 # starts with the GenDC signature:
@@ -1187,7 +1183,7 @@ def _may_be_gendc(*, p_type, buffer: _Buffer) -> bool:
     :param p_type:
     :param buffer:
     """
-    if p_type in _HANDLED_PAYLOAD_TYPES or p_type == _PAYLOAD_TYPE_GENDC:
+    if p_type in _HANDLED_PAYLOAD_TYPES or p_type == PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC:
         return False
     try:
         # The GenDC signature is b'GNDC' at the container start:
@@ -1290,7 +1286,7 @@ class Buffer(Module):
         available through ``self.module.payload_type``.
         """
         if isinstance(self._payload, PayloadGenDC):
-            return _PAYLOAD_TYPE_GENDC
+            return PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC
         return self.module.payload_type
 
     @property
@@ -1363,7 +1359,7 @@ class Buffer(Module):
         elif p_type == PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_MULTI_PART:
             payload = PayloadMultiPart(buffer=buffer, node_map=node_map)
 
-        elif p_type == _PAYLOAD_TYPE_GENDC or \
+        elif p_type == PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC or \
                 _may_be_gendc(p_type=p_type, buffer=buffer):
             try:
                 payload = PayloadGenDC(buffer=buffer, node_map=node_map)
@@ -1734,9 +1730,9 @@ class PayloadGenDC(Payload):
     def payload_type(self) -> int:
         """
         int: The type of the payload, which is
-        :const:`_PAYLOAD_TYPE_GENDC`.
+        :const:`PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC`.
         """
-        return _PAYLOAD_TYPE_GENDC
+        return PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC
 
     def __repr__(self):
         ret = ''

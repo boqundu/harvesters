@@ -34,7 +34,7 @@ Changes in This Fork (vs. 1.4.3)
 ======
 
 - 已在 Python 3.14 + genicam 1.6.0 + numpy 2.5 环境验证（RDMA 相机、BayerRG8 5320×4600、60 fps 场景）。
-- genicam < 1.5（无 ``PAYLOAD_TYPE_GENDC`` 常量）时自动回退到内置常量 11。
+- **要求 genicam ≥ 1.6**（ ``PAYLOAD_TYPE_GENDC`` 常量由所安装的 genicam 提供，源码不自带兜底常量），对应 **Python ≥ 3.10**（genicam 1.6 的 wheel 覆盖 cp310-cp314）。
 - payload type 0-8、10 的既有分支零改动（含回归测试）。
 
 ----

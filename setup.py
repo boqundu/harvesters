@@ -69,7 +69,10 @@ setuptools.setup(
     download_url='https://pypi.org/project/harvesters/',
     # A list of required Python modules:
     install_requires=[
-        'genicam>=1.2',
+        # core.py dispatches GenDC buffers on
+        # PAYLOADTYPE_INFO_IDS.PAYLOAD_TYPE_GENDC, which only exists in
+        # genicam >= 1.6:
+        'genicam>=1.6',
         'numpy'
     ],
     #
@@ -88,6 +91,8 @@ setuptools.setup(
     package_dir={
         '': 'src'
     },
+    # genicam 1.6 provides wheels for Python 3.10 through 3.14 only:
+    python_requires='>=3.10',
     # Keys: Package names.
     # Values: A list of globs.
     # All the files that match package_data will be added to the MANIFEST
