@@ -2364,7 +2364,10 @@ class ImageAcquirer:
                 self._setup_data_streams(file_dict=self._file_dict)
 
             for ds in self._data_streams:
-                buffer_size = self._determine_buffer_size(ds)
+                if ds.defines_payload_size():
+                    buffer_size = ds.payload_size
+                else:
+                    buffer_size = self.remote_device.node_map.PayloadSize.value
 
                 num_required_buffers = self._num_buffers
                 try:
@@ -2716,24 +2719,6 @@ class ImageAcquirer:
         assert buffer
         self._statistics.increment_num_images()
         self._statistics.update_timestamp(buffer)
-
-    def _determine_buffer_size(self, data_stream) -> int:
-        """
-        Determines the payload size that the buffers should be
-        allocated with.
-
-        Some GenTL Producers report that their data stream defines its
-        payload size but fail the actual inquiry until the acquisition
-        has been negotiated; for such a producer the size is taken from
-        the remote device's ``PayloadSize`` node.
-        """
-        if data_stream.defines_payload_size():
-            try:
-                return data_stream.payload_size
-            except GenTL_GenericException as e:
-                _logger.warning(e, exc_info=True)
-
-        return self.remote_device.node_map.PayloadSize.value
 
     def _create_raw_buffers(
             self, num_buffers: int = 0, size: int = 0) -> List[bytes]:
