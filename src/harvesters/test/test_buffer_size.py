@@ -64,32 +64,14 @@ class TestDetermineBufferSize(unittest.TestCase):
         acquirer = _make_acquirer(node_map=node_map)
         self.assertEqual(4321, acquirer._determine_buffer_size(ds))
 
-    def test_falls_back_to_calculation(self):
+    def test_falls_back_to_node_when_flag_is_false(self):
         ds = MagicMock()
         ds.defines_payload_size.return_value = False
 
-        node_map = SimpleNamespace(
-            Width=SimpleNamespace(value=4),
-            Height=SimpleNamespace(value=3),
-            PixelFormat=SimpleNamespace(
-                get_int_value=lambda: _MONO8),
-        )
+        node_map = MagicMock()
+        node_map.PayloadSize.value = 4321
         acquirer = _make_acquirer(node_map=node_map)
-        self.assertEqual(12, acquirer._determine_buffer_size(ds))
-
-    def test_raises_when_undeterminable(self):
-        ds = MagicMock()
-        ds.defines_payload_size.return_value = False
-
-        node_map = SimpleNamespace(
-            Width=SimpleNamespace(value=0),
-            Height=SimpleNamespace(value=3),
-            PixelFormat=SimpleNamespace(
-                get_int_value=lambda: _MONO8),
-        )
-        acquirer = _make_acquirer(node_map=node_map)
-        with self.assertRaises(Exception):
-            acquirer._determine_buffer_size(ds)
+        self.assertEqual(4321, acquirer._determine_buffer_size(ds))
 
 
 if __name__ == '__main__':

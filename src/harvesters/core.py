@@ -78,7 +78,6 @@ from harvesters._private.core.helper.system import is_running_on_windows
 from harvesters._private.core import gendc as _gendc
 from harvesters.util.logging import get_logger
 from harvesters.util.pfnc import dict_by_names, dict_by_ints
-from harvesters.util.pfnc import get_bits_per_pixel
 from harvesters.util.pfnc import Dictionary, _PixelFormat
 from harvesters.util.pfnc import component_2d_formats
 
@@ -2726,9 +2725,7 @@ class ImageAcquirer:
         Some GenTL Producers report that their data stream defines its
         payload size but fail the actual inquiry until the acquisition
         has been negotiated; for such a producer the size is taken from
-        the remote device's ``PayloadSize`` node and, as the last
-        resort, calculated from ``Width``, ``Height``, and the pixel
-        format.
+        the remote device's ``PayloadSize`` node.
         """
         if data_stream.defines_payload_size():
             try:
@@ -2736,32 +2733,7 @@ class ImageAcquirer:
             except GenTL_GenericException as e:
                 _logger.warning(e, exc_info=True)
 
-        try:
-            return self.remote_device.node_map.PayloadSize.value
-        except (GenTL_GenericException, GenApi_GenericException,
-                AttributeError) as e:
-            _logger.warning(e, exc_info=True)
-
-        # The last resort. A buffer that turns out too small makes the
-        # producer discard frames so keep the calculation conservative:
-        node_map = self.remote_device.node_map
-        width = node_map.Width.value
-        height = node_map.Height.value
-        format_value = node_map.PixelFormat.get_int_value()
-        symbolic = dict_by_ints.get(format_value)
-        bits = get_bits_per_pixel(symbolic) if symbolic else None
-        if not width or not height or not bits:
-            raise LogicalErrorException(
-                'cannot determine the payload size to allocate the '
-                'buffers with; neither the data stream nor the remote '
-                'device provides it, and it cannot be calculated from '
-                'Width ({}), Height ({}), and PixelFormat ({:#x})'.format(
-                    width, height, format_value))
-        size = width * height * bits // 8
-        _logger.warning(
-            'payload size calculated from the image geometry: {} '
-            'bytes'.format(size))
-        return size
+        return self.remote_device.node_map.PayloadSize.value
 
     def _create_raw_buffers(
             self, num_buffers: int = 0, size: int = 0) -> List[bytes]:
