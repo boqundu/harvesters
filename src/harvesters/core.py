@@ -3470,7 +3470,11 @@ class Harvester:
             try:
                 raw_producer.open(file_path)
             except GenTL_GenericException as e:
-                _logger.warning(e, exc_info=True)
+                # The producer was explicitly requested by the user so
+                # its failure to open is worth the default (ERROR)
+                # logging level; the most common field cause is that the
+                # host is missing the producer's runtime dependencies:
+                _logger.error(e, exc_info=True)
             else:
                 self._producers.append(Producer(module=raw_producer))
                 _logger.debug('initialized file: {0}'.format(raw_producer.path_name))
