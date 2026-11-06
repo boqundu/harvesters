@@ -530,35 +530,13 @@ class Device(Module):
 class Interface(Module):
     """Represents a GenTL Interface module."""
     def __init__(self, *, module: _Interface, parent=None):
-        try:
-            super().__init__(module=module, port=module.port, parent=parent)
-        except (GenTL_GenericException, GenApi_GenericException) as e:
-            # Not every GenTL producer provides an interface description
-            # (XML) on its interface port; the interface node map is
-            # optional so continue without it instead of making the
-            # whole device enumeration fail:
-            _logger.warning(
-                'the interface module does not provide its interface '
-                'description; continuing without an interface node '
-                'map: {}'.format(e))
-            super().__init__(module=module, port=None, parent=parent)
+        super().__init__(module=module, port=module.port, parent=parent)
 
 
 class System(Module):
     """Represents a GenTL System module."""
     def __init__(self, *, module: _System, parent):
-        try:
-            super().__init__(module=module, parent=parent, port=module.port)
-        except (GenTL_GenericException, GenApi_GenericException) as e:
-            # Not every GenTL producer provides a system interface
-            # description (XML) on its system port; the system node map
-            # is optional so continue without it instead of making the
-            # whole device enumeration fail:
-            _logger.warning(
-                'the system module does not provide its interface '
-                'description; continuing without a system node '
-                'map: {}'.format(e))
-            super().__init__(module=module, parent=parent, port=None)
+        super().__init__(module=module, parent=parent, port=module.port)
 
 
 class Producer(Module):
