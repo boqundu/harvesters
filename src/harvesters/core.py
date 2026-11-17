@@ -2688,10 +2688,25 @@ class ImageAcquirer:
         if self._event_new_buffer_thread and \
                 self._event_new_buffer_thread.is_running():
             buffer = None
+            watch_timeout = True if timeout > 0 else False
+            base = time.time()
             while not buffer:
                 buffer = self._try_fetch_from_queue(is_raw=is_raw)
                 if not buffer:
-                    time.sleep(cycle_s if cycle_s else 0.0001)
+                    if watch_timeout and \
+                            time.time() - base > timeout:
+                        raise TimeoutException
+                    if cycle_s:
+                        time.sleep(cycle_s)
+                    elif not watch_timeout:
+                        # No timeout to honor; sleep the short default
+                        # so that this loop yields to other threads:
+                        time.sleep(0.0001)
+                    # Otherwise (a watch timeout with cycle_s == 0):
+                    # re-probe the queue immediately; the timeout
+                    # check above ends the loop. Sleeping here instead
+                    # would round up to a system timer tick on Windows
+                    # and stall the calling thread for ~15 ms.
                 else:
                     return buffer
         else:
