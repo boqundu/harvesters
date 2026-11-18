@@ -2462,6 +2462,7 @@ class ImageAcquirer:
                     if queue.full():
                         _buffer = queue.get()
                         _buffer.parent.queue_buffer(_buffer)
+                        self._statistics.count_evicted_buffer()
                     queue.put(buffer)
                 self._emit_callbacks(self.Events.NEW_BUFFER_AVAILABLE)
 
@@ -3094,6 +3095,13 @@ class Harvester:
         Resets the Harvester object to the initial state.
         """
         self._finalizer()
+
+        # The weakref finalizer is one-shot; re-arm it so that this
+        # object can be reset again, for example when the client
+        # switches to another CTI file. Without re-arming, the second
+        # reset silently keeps the previous CTI files and the next
+        # update enumerates the old producer's devices as well:
+        self._finalizer = weakref.finalize(self, self._reset)
 
     @property
     def cti_files(self):

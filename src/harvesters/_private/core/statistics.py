@@ -23,6 +23,7 @@ import time
 from collections import deque
 
 # Related third party imports
+from genicam.gentl import GenericException as GenTL_GenericException
 
 # Local application/library specific imports
 
@@ -57,10 +58,13 @@ class Statistics:
 
     def update_timestamp(self, buffer):
         #
-        # The buffer itself is not inspected; see the class comment.
         # The core updates the image count before it calls this
         # method, so every delivered buffer extends the window by one.
+        # The frame id of the buffer is inspected to detect frames that
+        # have been dropped on the way from the device to the host.
         #
+        self._count_lost_frames(buffer)
+
         now = self._perf_counter()
         self._samples.append((now, self._num_images))
 
@@ -92,6 +96,39 @@ class Statistics:
             if self._fps_min is None or rate < self._fps_min:
                 self._fps_min = rate
 
+    def count_evicted_buffer(self):
+        #
+        # Counts a fetched buffer that the internal buffer queue has
+        # replaced with a newer frame before it was handed to the client.
+        #
+        self._num_images_evicted += 1
+
+    @staticmethod
+    def _get_frame_id(buffer):
+        try:
+            return int(buffer.frame_id)
+        except (GenTL_GenericException, AttributeError, TypeError,
+                ValueError):
+            return None
+
+    def _count_lost_frames(self, buffer):
+        #
+        # Frames that never reached the host are detected through the
+        # gaps of the device frame id (BlockID), which wraps around at
+        # 16 bits.
+        #
+        frame_id = self._get_frame_id(buffer)
+        if frame_id is None:
+            if self._frame_id_available is None:
+                self._frame_id_available = False
+            return
+        self._frame_id_available = True
+        if self._last_frame_id is not None:
+            delta = (frame_id - self._last_frame_id) & 0xFFFF
+            if 1 < delta < 0x8000:
+                self._num_images_lost += delta - 1
+        self._last_frame_id = frame_id
+
     def reset(self):
         self._time_base = time.time()
         self._time_elapsed = 0
@@ -100,6 +137,10 @@ class Statistics:
         self._fps = 0.
         self._fps_max = 0.
         self._fps_min = None
+        self._last_frame_id = None
+        self._frame_id_available = None
+        self._num_images_lost = 0
+        self._num_images_evicted = 0
 
     def increment_num_images(self, num=1):
         self._time_elapsed = time.time() - self._time_base
@@ -120,6 +161,19 @@ class Statistics:
     @property
     def num_images(self):
         return self._num_images
+
+    @property
+    def num_images_lost(self):
+        #
+        # The number of frames that the device or the producer has
+        # dropped before the delivery; None when the producer does not
+        # report a frame id.
+        #
+        return self._num_images_lost if self._frame_id_available else None
+
+    @property
+    def num_images_evicted(self):
+        return self._num_images_evicted
 
     @property
     def elapsed_time_s(self):
